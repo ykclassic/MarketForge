@@ -2,7 +2,7 @@
 aiohttp==3.9.3
 aiosqlite==0.20.0
 pandas==2.2.1
-pandas-ta==0.3.14b0
+pandas-ta-classic
 python-dotenv==1.0.1
 flake8==7.0.0
 bandit==1.7.7
