@@ -2,7 +2,7 @@ import json
 import asyncio
 import logging
 import pandas as pd
-import pandas_classic as ta
+import pandas_ta_classic as ta
 import aiosqlite
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
