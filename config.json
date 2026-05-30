@@ -27,6 +27,12 @@
       "4h"
     ]
   },
+  "risk_management": {
+    "atr_period": 14,
+    "sl_multiplier": 1.5,
+    "tp1_multiplier": 1.0,
+    "tp2_multiplier": 2.0
+  },
   "bridge": {
     "discord_webhook_env_key": "DISCORD_WEBHOOK_URL",
     "embed_color_bullish": "0x00FF00",
