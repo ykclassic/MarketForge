@@ -22,7 +22,7 @@ except FileNotFoundError:
 XT_API_BASE_URL = os.getenv("XT_API_BASE_URL", CONFIG['data_ingestion']['exchange_url'])
 
 async def init_db():
-    """Initializes the database schema with unique constraints to prevent duplication."""
+    """Initializes the database schema with automatic state migrations for new features."""
     async with aiosqlite.connect('signals.db', timeout=10.0) as db:
         await db.execute('''
             CREATE TABLE IF NOT EXISTS market_data (
@@ -43,11 +43,26 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
                 direction TEXT NOT NULL,
+                price REAL DEFAULT 0.0,
+                stop_loss REAL DEFAULT 0.0,
+                take_profit_1 REAL DEFAULT 0.0,
+                take_profit_2 REAL DEFAULT 0.0,
                 indicators_triggered TEXT NOT NULL,
                 timestamp INTEGER NOT NULL,
                 is_sent INTEGER DEFAULT 0
             )
         ''')
+        
+        # Schema Migration: Add new risk columns if they don't exist in an older database
+        cursor = await db.execute("PRAGMA table_info(alerts)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if 'price' not in columns:
+            await db.execute("ALTER TABLE alerts ADD COLUMN price REAL DEFAULT 0.0")
+            await db.execute("ALTER TABLE alerts ADD COLUMN stop_loss REAL DEFAULT 0.0")
+            await db.execute("ALTER TABLE alerts ADD COLUMN take_profit_1 REAL DEFAULT 0.0")
+            await db.execute("ALTER TABLE alerts ADD COLUMN take_profit_2 REAL DEFAULT 0.0")
+            logging.info("Database schema migrated: Added ATR risk management columns.")
+
         await db.commit()
         logging.info("Database 'signals.db' initialized.")
 
@@ -83,19 +98,16 @@ async def ingest_and_sanitize(symbol: str, interval: str):
 
         async with aiosqlite.connect('signals.db', timeout=10.0) as db:
             for candle in records:
-                # Defensive check: ensure candle is a dictionary with the required 't' key
                 if not isinstance(candle, dict) or 't' not in candle:
                     logging.warning(f"Skipping malformed candle: {candle}")
                     continue
                 
                 try:
-                    # Map XT.com v4 dictionary keys
                     timestamp = int(candle['t'])
                     open_price = float(candle['o'])
                     high_price = float(candle['h'])
                     low_price = float(candle['l'])
                     close_price = float(candle['c'])
-                    # 'q' is Quantity (Base Asset Volume), 'v' is Quote Volume
                     volume = float(candle['q']) 
                     
                     await db.execute('''
