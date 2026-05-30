@@ -1,8 +1,8 @@
 
-aiohttp==3.9.3
-aiosqlite==0.20.0
-pandas==2.2.1
+aiohttp
+aiosqlite
+pandas
 pandas-ta-classic
-python-dotenv==1.0.1
-flake8==7.0.0
+python-dotenv
+flake
 bandit==1.7.7
