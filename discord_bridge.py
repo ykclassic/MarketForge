@@ -1,10 +1,9 @@
 import os
 import json
-import asyncio
 import logging
-from datetime import datetime, timezone
-import aiohttp
+import asyncio
 import aiosqlite
+import aiohttp
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,87 +17,92 @@ except FileNotFoundError:
     logging.critical("config.json not found. Execution halted.")
     exit(1)
 
-env_key = CONFIG['bridge']['discord_webhook_env_key']
-DISCORD_WEBHOOK_URL = os.getenv(env_key)
+def format_price(val):
+    """Truncates decimal float values dynamically for clean UI representation."""
+    if val >= 1:
+        return f"{val:,.2f}"
+    return f"{val:,.6f}"
 
-def build_discord_embed(symbol: str, direction: str, indicators: str, timestamp_ms: int) -> dict:
-    try:
-        color_hex = CONFIG['bridge']['embed_color_bullish'] if direction == "BULLISH" else CONFIG['bridge']['embed_color_bearish']
-        color = int(color_hex, 16)
-    except ValueError:
-        color = 0x00FF00 if direction == "BULLISH" else 0xFF0000
-
-    emoji = "🟢" if direction == "BULLISH" else "🔴"
-    dt_utc = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
-    formatted_time = dt_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
-
-    embed = {
-        "title": f"{emoji} RICH SIGNAL ALERT: {symbol.upper()}",
-        "description": "High-probability multi-timeframe consensus achieved.",
-        "color": color,
-        "fields": [
-            {"name": "Asset Ticker", "value": f"**{symbol.upper()}**", "inline": True},
-            {"name": "Market Bias", "value": f"**{direction}**", "inline": True},
-            {"name": "Indicators Triggered", "value": f"`{indicators}`", "inline": False},
-            {"name": "Risk Protocol", "value": "Strict invalidation required at local swing high/low.", "inline": False}
-        ],
-        "footer": {"text": f"Algorithmic Execution Engine | {formatted_time}"}
-    }
-    return {"embeds": [embed]}
-
-async def dispatch_webhook(session: aiohttp.ClientSession, payload: dict) -> bool:
-    if not DISCORD_WEBHOOK_URL:
-        logging.error(f"Webhook URL missing. Ensure {env_key} is set.")
-        return False
-
-    headers = {"Content-Type": "application/json"}
+async def process_queue():
+    logging.info("Executing Headless Discord Signal Bridge..")
     
-    try:
-        async with session.post(DISCORD_WEBHOOK_URL, data=json.dumps(payload), headers=headers) as response:
-            if response.status in (200, 204):
-                return True
-            elif response.status == 429:
-                retry_after = (await response.json()).get("retry_after", 1)
-                logging.warning(f"Rate limited by Discord. Retrying after {retry_after}s...")
-                await asyncio.sleep(retry_after)
-                return await dispatch_webhook(session, payload)
-            else:
-                logging.error(f"Discord Error {response.status}: {await response.text()}")
-                return False
-    except aiohttp.ClientError as e:
-        logging.error(f"Network error during webhook dispatch: {e}")
-        return False
+    env_key = CONFIG['bridge']['discord_webhook_env_key']
+    webhook_url = os.getenv(env_key)
+    
+    if not webhook_url:
+        logging.error(f"Missing environment variable: {env_key}")
+        return
 
-async def process_signal_queue():    
-    async with aiohttp.ClientSession() as session:
-        while True:
-            async with aiosqlite.connect('signals.db', timeout=10.0) as db:
-                db.row_factory = aiosqlite.Row
-                async with db.execute("SELECT * FROM alerts WHERE is_sent = 0 ORDER BY timestamp ASC") as cursor:
-                    unsent_alerts = await cursor.fetchall()
-                
-                if unsent_alerts:
-                    for alert in unsent_alerts:
-                        payload = build_discord_embed(
-                            symbol=alert["symbol"],
-                            direction=alert["direction"],
-                            indicators=alert["indicators_triggered"],
-                            timestamp_ms=alert["timestamp"]
-                        )
-                        
-                        success = await dispatch_webhook(session, payload)
-                        
-                        if success:
-                            await db.execute("UPDATE alerts SET is_sent = 1 WHERE id = ?", (alert["id"],))
-                            await db.commit()
-                            logging.info(f"Signal {alert['id']} bridged to Discord.")
-                        
-                        await asyncio.sleep(0.5) 
+    client_id = CONFIG.get('client_id', 'Unknown Client')
+    strict_mode = CONFIG['consensus_engine'].get('strict_mode', True)
+
+    async with aiosqlite.connect('signals.db', timeout=10.0) as db:
+        async with db.execute("SELECT id, symbol, direction, price, stop_loss, take_profit_1, take_profit_2, indicators_triggered FROM alerts WHERE is_sent = 0") as cursor:
+            unsent_alerts = await cursor.fetchall()
             
-            # Note: In a CI/CD cron environment, an infinite loop blocks the runner.
-            # To execute completely via GitHub Actions, the while loop will exit if no signals remain.
-            break
+        if not unsent_alerts:
+            return
+
+        async with aiohttp.ClientSession() as session:
+            for alert in unsent_alerts:
+                alert_id, symbol, direction, price, stop_loss, tp1, tp2, indicators = alert
+                
+                # Theme alignment based on signal intent
+                if direction == "LONG":
+                    color_hex = CONFIG['bridge']['embed_color_bullish']
+                    title = f"🟢 STRICT CONSENSUS MET: {symbol.upper().replace('_', '/')}"
+                    dir_text = "📈 LONG (Bullish)"
+                else:
+                    color_hex = CONFIG['bridge']['embed_color_bearish']
+                    title = f"🔴 STRICT CONSENSUS MET: {symbol.upper().replace('_', '/')}"
+                    dir_text = "📉 SHORT (Bearish)"
+                
+                decimal_color = int(color_hex, 16)
+                
+                # Payload construction matching exact structural specifications
+                payload = {
+                    "embeds": [
+                        {
+                            "title": title,
+                            "color": decimal_color,
+                            "fields": [
+                                {
+                                    "name": "Direction",
+                                    "value": dir_text,
+                                    "inline": True
+                                },
+                                {
+                                    "name": "Execution Price",
+                                    "value": f"${format_price(price)}",
+                                    "inline": True
+                                },
+                                {
+                                    "name": "🎯 Trade Parameters (ATR-Adjusted)",
+                                    "value": f"**Take Profit 2:** ${format_price(tp2)}\n**Take Profit 1:** ${format_price(tp1)}\n**Stop Loss:** ${format_price(stop_loss)}"
+                                },
+                                {
+                                    "name": "📊 Indicator Matrix Alignment",
+                                    "value": indicators
+                                }
+                            ],
+                            "footer": {
+                                "text": f"Client ID: {client_id} | Strict Mode: {strict_mode}"
+                            }
+                        }
+                    ]
+                }
+                
+                # Network transmission with back-off handling wrapper
+                async with session.post(webhook_url, json=payload) as response:
+                    if response.status in [200, 204]:
+                        await db.execute("UPDATE alerts SET is_sent = 1 WHERE id = ?", (alert_id,))
+                        await db.commit()
+                        logging.info(f"Dispatched webhook for {symbol} ({direction})")
+                    elif response.status == 429:
+                        logging.warning("Discord Rate Limit Hit. Queuing remainder for next cycle.")
+                        break
+                    else:
+                        logging.error(f"Webhook Delivery Failed HTTP {response.status}")
 
 if __name__ == "__main__":
-    logging.info("Executing Headless Discord Signal Bridge...")
-    asyncio.run(process_signal_queue())
+    asyncio.run(process_queue())
