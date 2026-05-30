@@ -1,0 +1,23 @@
+{
+  "client_id": "alpha_group_omega_001",
+  "data_ingestion": {
+    "exchange_url": "https://sapi.xt.com",
+    "symbols": [
+      "btc_usdt",
+      "eth_usdt"
+    ],
+    "intervals": [
+      "15m",
+      "1h",
+      "4h"
+    ]
+  },
+  "consensus_engine": {
+    "strict_mode": true,
+    "required_macro_alignment": ["1h", "4h"]
+  },
+  "bridge": {
+    "embed_color_bullish": "0x00FF00",
+    "embed_color_bearish": "0xFF0000"
+  }
+}
