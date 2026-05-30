@@ -60,8 +60,6 @@ async def fetch_xt_market_data(session: aiohttp.ClientSession, symbol: str, inte
         async with session.get(endpoint, params=params) as response:
             if response.status == 200:
                 payload = await response.json()
-                # XT.com v4 typical structure: {"result": [[t, o, c, h, l, v, amount], ...]}
-                # Accessing 'result' key to avoid the KeyError previously encountered
                 records = payload.get("result", [])
                 if isinstance(records, list):
                     return records
@@ -76,7 +74,7 @@ async def fetch_xt_market_data(session: aiohttp.ClientSession, symbol: str, inte
         return []
 
 async def ingest_and_sanitize(symbol: str, interval: str):
-    """Parses candle data and performs safe database insertion."""
+    """Parses dictionary candle data and performs safe database insertion."""
     async with aiohttp.ClientSession() as session:
         records = await fetch_xt_market_data(session, symbol, interval)
         
@@ -85,28 +83,28 @@ async def ingest_and_sanitize(symbol: str, interval: str):
 
         async with aiosqlite.connect('signals.db', timeout=10.0) as db:
             for candle in records:
-                # Defensive check: ensure candle is an indexable list
-                if not isinstance(candle, (list, tuple)) or len(candle) < 7:
+                # Defensive check: ensure candle is a dictionary with the required 't' key
+                if not isinstance(candle, dict) or 't' not in candle:
                     logging.warning(f"Skipping malformed candle: {candle}")
                     continue
                 
                 try:
-                    # Map XT.com v4 indices: [Timestamp, Open, Close, High, Low, QuoteVol, Vol]
-                    # Note: Adjust indices if your specific endpoint uses a different array order
-                    timestamp = int(candle[0])
-                    open_price = float(candle[1])
-                    close_price = float(candle[2])
-                    high_price = float(candle[3])
-                    low_price = float(candle[4])
-                    volume = float(candle[6]) 
+                    # Map XT.com v4 dictionary keys
+                    timestamp = int(candle['t'])
+                    open_price = float(candle['o'])
+                    high_price = float(candle['h'])
+                    low_price = float(candle['l'])
+                    close_price = float(candle['c'])
+                    # 'q' is Quantity (Base Asset Volume), 'v' is Quote Volume
+                    volume = float(candle['q']) 
                     
                     await db.execute('''
                         INSERT OR IGNORE INTO market_data 
                         (symbol, interval, timestamp, open, high, low, close, volume)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (symbol, interval, timestamp, open_price, high_price, low_price, close_price, volume))
-                except (ValueError, TypeError) as e:
-                    logging.warning(f"Sanitization error for {symbol}: {e}")
+                except (ValueError, TypeError, KeyError) as e:
+                    logging.warning(f"Sanitization error for {symbol}: {e} | Candle data: {candle}")
                     continue
             
             await db.commit()
