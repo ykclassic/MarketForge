@@ -4,7 +4,15 @@
     "exchange_url": "https://sapi.xt.com",
     "symbols": [
       "btc_usdt",
-      "eth_usdt"
+      "eth_usdt",
+      "bnb_usdt",
+      "sol_usdt",
+      "xrp_usdt",
+      "sui_usdt",
+      "ada_usdt",
+      "doge_usdt",
+      "link_usdt",
+      "ltc_usdt"
     ],
     "intervals": [
       "15m",
