@@ -4,5 +4,5 @@ aiosqlite
 pandas
 pandas-ta-classic
 python-dotenv
-flake
+flake==7.0.0
 bandit==1.7.7
